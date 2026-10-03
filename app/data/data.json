@@ -1,0 +1,14 @@
+{
+    "project": "RateLimitAPI",
+    "message": "Hello from the API",
+    "items": [
+        {
+            "id": 1,
+            "name": "FastAPI"
+        },
+        {
+            "id": 2,
+            "name": "Redis"
+        }
+    ]
+}
