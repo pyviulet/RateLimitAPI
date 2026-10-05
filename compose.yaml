@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    container_name: ratelimit-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  redis:
+      image: redis:latest
+      container_name: redis
+      ports:
+        - "6379:6379"
+      restart: unless-stopped
