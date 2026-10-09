@@ -1,26 +1,23 @@
 # Environment variables and secrets
 .env
 .env.*
-
-# Keep the example environment file
 !.env.example
 
 # Python bytecode
 __pycache__/
 *.py[cod]
-*$py.class
 
 # Virtual environments
 .venv/
 venv/
 env/
 
-# Distribution and packaging
+# Build artifacts
 build/
 dist/
 *.egg-info/
 
-# Testing and coverage
+# Testing
 .pytest_cache/
 .coverage
 .coverage.*
@@ -42,7 +39,6 @@ htmlcov/
 # OS-generated files
 .DS_Store
 Thumbs.db
-
 
 # Application data
 app/data/
