@@ -2,14 +2,13 @@ import json
 import logging
 import time
 import uuid
+import os
 import redis.asyncio as redis
 
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request
 from app.schema import RedisRequest
 
-
-
-app = FastAPI()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,11 +23,23 @@ logger = logging.getLogger(__name__)
 
 LIMIT = 5
 
-client = redis.Redis(
-    host="redis",
-    port=6379,
-    decode_responses=True,
-)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    client = redis.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=6379,
+        decode_responses=True,
+    )
+
+    app.state.redis = client
+
+    yield
+
+    await client.aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/api/data")
@@ -39,10 +50,14 @@ async def get_data():
     return data
 
 
-
 @app.post("/api/redis")
-async def redis_test(request: RedisRequest):
-    await client.set("username", request.username)
+async def redis_test(
+    request: Request,
+    redis_request: RedisRequest,
+):
+    client = request.app.state.redis
+
+    await client.set("username", redis_request.username)
 
     value = await client.get("username")
 
@@ -50,15 +65,19 @@ async def redis_test(request: RedisRequest):
 
 
 @app.post("/api/submit")
-async def submit():
-    key = "requests.global"
+async def submit(request: Request):
+    client = request.app.state.redis
 
+    client_ip = request.client.host
+    key = f"rate_limit:{client_ip}"
+
+
+    # token + IP + agent
     now = time.time()
-
-
 
     await client.zremrangebyscore(key, 0, now - 60)
 
+    # Count requests remaining in the last 60 seconds
     count = await client.zcard(key)
 
     if count >= LIMIT:
@@ -72,7 +91,6 @@ async def submit():
             status_code=429,
             detail="Rate limit exceeded",
         )
-
 
     request_id = str(uuid.uuid4())
 
@@ -89,10 +107,3 @@ async def submit():
         "message": "Request allowed ",
         "request_count": count + 1,
     }
-
-
-
-
-
-
-

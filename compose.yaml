@@ -4,6 +4,8 @@ services:
     container_name: ratelimit-api
     ports:
       - "8000:8000"
+    environment:
+      REDIS_HOST: redis
     depends_on:
       - redis
 

@@ -1,10 +1,51 @@
+# Environment variables and secrets
 .env
-.idea/
+.env.*
+
+# Keep the example environment file
+!.env.example
+
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Distribution and packaging
+build/
+dist/
+*.egg-info/
+
+# Testing and coverage
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checking and linting
+.mypy_cache/
+.dmypy.json
+.pyre/
+.ruff_cache/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# OS-generated files
+.DS_Store
+Thumbs.db
 
 
+# Application data
+app/data/
 
-app.log
+# Local development scripts
+/scripts/
