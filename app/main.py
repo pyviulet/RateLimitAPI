@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import uuid
 
@@ -7,21 +6,24 @@ import redis.asyncio as redis
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.schema import RedisRequest
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler("app.log"),
-        logging.StreamHandler(),
-    ],
+from app.logger.config import logger
+from app.logger.requests import (
+    log_request_allowed,
+    log_request_rejected,
+)
+from app.logger.failures import (
+    log_redis_failure,
+    log_fail_open,
 )
 
-logger = logging.getLogger(__name__)
+from app.monitoring.total_requests import rate_limit_requests_total
+from app.monitoring.rejections import rate_limit_rejections_total
+from app.monitoring.redis_failures import rate_limit_redis_failures_total
 
 
 # Token Bucket configuration
@@ -43,9 +45,10 @@ async def lifespan(app: FastAPI):
 
     app.state.redis = client
 
-    yield
-
-    await client.aclose()
+    try:
+        yield
+    finally:
+        await client.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -120,6 +123,9 @@ async def rate_limit_middleware(
     if route not in RATE_LIMITED_ROUTES:
         return await call_next(request)
 
+    # Count every request that reaches the rate limiter.
+    rate_limit_requests_total.inc()
+
     client = request.app.state.redis
 
     client_ip = (
@@ -140,33 +146,37 @@ async def rate_limit_middleware(
             1,
         )
 
-    except redis.RedisError:
-        logger.exception(
-            "event=rate_limiter_failure "
-            "mode=fail_open client_ip=%s route=%s",
-            client_ip,
-            request.url.path,
+    except redis.RedisError as error:
+        # Count the Redis failure.
+        rate_limit_redis_failures_total.inc()
+
+        # Record the failure and fail-open decision.
+        log_redis_failure(
+            client_ip=client_ip,
+            route=request.url.path,
+            error=error,
+        )
+
+        log_fail_open(
+            client_ip=client_ip,
+            route=request.url.path,
         )
 
         # Fail-open: allow the request to continue.
         request.state.tokens_remaining = None
-
-        logger.warning(
-            "event=request_allowed_without_rate_limit "
-            "reason=redis_unavailable client_ip=%s",
-            client_ip,
-        )
 
         return await call_next(request)
 
     allowed = int(result[0])
     tokens_remaining = float(result[1])
 
+    # Reject requests that exceed the rate limit.
     if not allowed:
-        logger.warning(
-            "event=rate_limit_exceeded client_ip=%s route=%s",
-            client_ip,
-            request.url.path,
+        rate_limit_rejections_total.inc()
+
+        log_request_rejected(
+            client_ip=client_ip,
+            route=request.url.path,
         )
 
         return JSONResponse(
@@ -174,18 +184,18 @@ async def rate_limit_middleware(
             content={"detail": "Rate limit exceeded"},
         )
 
+    # Allow the request.
     request_id = str(uuid.uuid4())
     request.state.tokens_remaining = tokens_remaining
 
-    logger.info(
-        "event=request_allowed request_id=%s "
-        "client_ip=%s tokens_remaining=%.2f",
-        request_id,
-        client_ip,
-        tokens_remaining,
+    log_request_allowed(
+        client_ip=client_ip,
+        route=request.url.path,
+        tokens_remaining=tokens_remaining,
     )
 
     return await call_next(request)
+
 
 @app.get("/api/data")
 async def get_data():
@@ -221,3 +231,11 @@ async def submit(request: Request):
             else None
         ),
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
